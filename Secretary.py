@@ -1,98 +1,87 @@
 import streamlit as st
 import sqlite3
+import requests
+import json
 from datetime import datetime
 
-# --- 1. SETTINGS & STYLE ---
-st.set_page_config(page_title="Secretary V1", page_icon="⭐", layout="wide")
+# --- 1. การตั้งค่ามาตรฐาน (Identity & Style) ---
+ST_ICON = "⭐" # KTK Icon according to memory
+ST_TITLE = "Secretary V1 - James Protocol"
 
-# ปรับแต่ง CSS เล็กน้อยเพื่อให้ตารางดูประณีตขึ้น
-st.markdown("""
-    <style>
-    .main { background-color: #f5f5f5; }
-    .stTable { background-color: white; border-radius: 10px; }
-    </style>
-    """, unsafe_allow_stdio=True)
-
-# --- 2. DATABASE ENGINE ---
-def get_db_connection():
-    return sqlite3.connect('secretary_memory.db', check_same_thread=False)
-
+# --- 2. ส่วนของ "สมอง" (Database Layer) ---
 def init_db():
-    conn = get_db_connection()
+    conn = sqlite3.connect('secretary_memory.db')
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS legacy_log 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  timestamp TEXT, 
-                  category TEXT, 
-                  content TEXT,
-                  status TEXT)''')
+    # สร้างตารางถ้ายังไม่มี (Mandatory Checklist: Persistent Storage)
+    c.execute('''CREATE TABLE IF NOT EXISTS logs 
+                 (timestamp TEXT, category TEXT, content TEXT)''')
     conn.commit()
     conn.close()
 
-init_db()
-
-# --- 3. UI LOGIC ---
-st.title("⭐ Secretary V1: The Identity Keeper")
-st.caption("ระบบรวบรวมตะกอนความคิด - User: Kriangkrai (James)")
-
-# Sidebar 
-with st.sidebar:
-    st.header("⚙️ เมนูควบคุม")
-    mode = st.radio("เลือกโหมดการทำงาน", ["📥 บันทึกข้อมูล", "📖 เรียกดูคลังความจำ"])
-    st.markdown("---")
-    st.write("สถานะระบบ: **Online**")
-
-if mode == "📥 บันทึกข้อมูล":
-    st.subheader("บันทึกสิ่งที่ตกตะกอนลงในจิตใต้สำนึกดิจิทัล")
-    with st.form("identity_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            category = st.selectbox("หมวดหมู่", 
-                                  ["การเทรด (Logic/Strategy)", 
-                                   "จิตวิทยา (Mindset/Soul)", 
-                                   "ครอบครัว (Legacy/Education)", 
-                                   "เทคโนโลยี (Code/AI)"])
-        with col2:
-            status = st.select_slider("ความสำคัญ", options=["ทั่วไป", "สำคัญ", "กฎเหล็ก"])
-        
-        content = st.text_area("รายละเอียดประสบการณ์/สิ่งที่เรียนรู้:", height=200)
-        
-        submit = st.form_submit_button("บันทึกข้อมูลถาวร")
-        
-        if submit and content:
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            conn = get_db_connection()
-            c = conn.cursor()
-            c.execute("INSERT INTO legacy_log (timestamp, category, content, status) VALUES (?, ?, ?, ?)",
-                      (now, category, content, status))
-            conn.commit()
-            conn.close()
-            st.success("✅ บันทึกสำเร็จ: ข้อมูลถูกจัดเก็บเรียบร้อยครับพี่เกรียง")
-
-else:
-    st.subheader("คลังความจำที่ตกตะกอนแล้ว (History)")
-    conn = get_db_connection()
+def save_memory(category, content):
+    conn = sqlite3.connect('secretary_memory.db')
     c = conn.cursor()
-    # ดึงข้อมูลโดยตรงจาก SQLite
-    c.execute("SELECT timestamp, category, content, status FROM legacy_log ORDER BY id DESC")
-    data = c.fetchall()
+    c.execute("INSERT INTO logs VALUES (?, ?, ?)", 
+              (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), category, content))
+    conn.commit()
     conn.close()
+
+# --- 3. ส่วนของ "ปาก" (Communication Protocol) ---
+def send_line_standard(msg):
+    # แก่นของโปรโตคอล: คุยตรงกับ LINE ไม่ผ่าน Library ซับซ้อน
+    url = 'https://api.line.me/v2/bot/message/broadcast'
+    token = 'ใส่_TOKEN_ของพี่ตรงนี้' # พี่นำ Token มาใส่จุดนี้
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {token}'
+    }
+    data = {
+        "messages": [{"type": "text", "text": f"{ST_ICON} [James Secretary]:\n{msg}"}]
+    }
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(data))
+        return response.status_code
+    except:
+        return 500
+
+# --- 4. ส่วนหน้าจอ (User Interface Layer) ---
+def main():
+    st.set_page_config(page_title=ST_TITLE, page_icon=ST_ICON)
+    st.title(f"{ST_ICON} {ST_TITLE}")
     
-    if data:
-        # กำหนดหัวตาราง
-        header = ["วัน-เวลา", "หมวดหมู่", "เนื้อหาที่บันทึก", "ระดับความสำคัญ"]
-        
-        # แสดงผลในรูปแบบ Table ของ Streamlit (Lightweight)
-        # เราแปลงข้อมูลเป็น list ของ dict เพื่อความอ่านง่าย
-        display_data = []
-        for row in data:
-            display_data.append({
-                "วัน-เวลา": row[0],
-                "หมวดหมู่": row[1],
-                "เนื้อหา": row[2],
-                "สถานะ": row[3]
-            })
-        
-        st.table(display_data)
-    else:
-        st.info("ยังไม่มีข้อมูลที่บันทึกไว้ในสมุดเล่มนี้")
+    init_db()
+
+    # ช่องรับข้อมูล (The Interface)
+    category = st.selectbox("หมวดหมู่การจดบันทึก", ["General", "Trading Logic", "Personal Audit"])
+    user_input = st.text_area("สั่งงานเลขาหรือบันทึกข้อมูลที่นี่...", placeholder="พิมพ์สิ่งที่พี่ต้องการให้เลขาจำ...")
+
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("บันทึกลงสมอง (Save)"):
+            if user_input:
+                save_memory(category, user_input)
+                st.success("เลขาบันทึกเรียบร้อยแล้วครับพี่")
+            else:
+                st.warning("พี่ต้องพิมพ์ข้อมูลก่อนนะครับ")
+
+    with col2:
+        if st.button("แจ้งเตือนเข้า Line (Push)"):
+            if user_input:
+                status = send_line_standard(user_input)
+                if status == 200:
+                    st.info("ส่งข้อมูลเข้า Line เรียบร้อยครับ")
+                else:
+                    st.error(f"การเชื่อมต่อติดขัด (Code: {status})")
+
+    # ส่วนแสดงผลความจำ (Memory Audit)
+    st.divider()
+    st.subheader("📋 รายการบันทึกล่าสุด")
+    conn = sqlite3.connect('secretary_memory.db')
+    import pandas as pd
+    df = pd.read_sql_query("SELECT * FROM logs ORDER BY timestamp DESC LIMIT 5", conn)
+    st.table(df)
+    conn.close()
+
+if __name__ == "__main__":
+    main()
